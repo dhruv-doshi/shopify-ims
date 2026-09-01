@@ -1,0 +1,8 @@
+This is a rough idea of what I want from this project. 
+
+I want to build an inventory management system for shopify. This will be used by the sellers. However, I want it such that the controls are via telegram. I want the following main features:
+1. If I send an image of my item via telegram, it would automatically create 1 new image that will not have any distractions and will basically resemble a product-shoot type of image for that particular product. I will send images in bulk to update my inventory. 
+2. Once I do this, I want you to generate a "short-lived link" which will have the following questions for each image - name, price, discount, quantity. For this, I want to use the swipe motion from the online-dating apps to approve or reject the product, etc. All these should be autofilled - the name shall be based on the given photo and show values to pick for the other 3 fields. the swiping right and left will basically be to show the approval for the image that has been generated. For now, it can just be a carousal, but i want to record this motion and save it for now. 
+3. After this, whenever, the seller wants some data, they can ask for it. If the data is large and needs some graphics to be displayed or needs more space than a single message on telegram, then a new "short-lived link" will have to be created which will be given to the seller. 
+
+For now, lets start with these basic requirements. I have an openrouter API key, so we can use that. We can use the shopify MCP or something that can be helpful. I also wouldnt mind using a very small pi-agent if necessary. 

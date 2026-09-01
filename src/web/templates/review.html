@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Review products</title>
+  <link rel="stylesheet" href="/static/review.css" />
+</head>
+<body>
+  <main class="container">
+    <header>
+      <h1>Review products</h1>
+      <p id="progress"></p>
+      <p id="expiry" class="expiry"></p>
+    </header>
+    <section id="card" class="card" data-token="{{ token }}">
+      <div id="image-wrap" class="image-wrap">
+        <div class="image-pair">
+          <div class="image-block">
+            <span class="image-label">Original</span>
+            <img id="original-image" alt="Original product" />
+          </div>
+          <div class="image-block">
+            <span class="image-label">Generated</span>
+            <img id="generated-image" alt="Generated product" />
+          </div>
+        </div>
+      </div>
+      <label>Name <input id="name" type="text" /></label>
+      <div class="field">
+        <span>Price</span>
+        <div id="price-chips" class="chips"></div>
+        <input id="price-custom" type="number" step="0.01" placeholder="Custom price" />
+      </div>
+      <div class="field">
+        <span>Discount %</span>
+        <div id="discount-chips" class="chips"></div>
+        <input id="discount-custom" type="number" step="1" placeholder="Custom discount" />
+      </div>
+      <div class="field">
+        <span>Quantity</span>
+        <div id="quantity-chips" class="chips"></div>
+        <input id="quantity-custom" type="number" step="1" placeholder="Custom quantity" />
+      </div>
+      <div class="actions">
+        <button id="prev" type="button">Prev</button>
+        <button id="reject" type="button" class="reject">Reject</button>
+        <button id="approve" type="button" class="approve">Approve</button>
+        <button id="next" type="button">Next</button>
+      </div>
+      <button id="finish" type="button" class="finish">Finish review</button>
+      <p id="status"></p>
+    </section>
+  </main>
+  <script src="/static/review.js"></script>
+</body>
+</html>

@@ -1,0 +1,20 @@
+* { box-sizing: border-box; }
+body { font-family: system-ui, sans-serif; margin: 0; background: #f5f5f5; color: #111; }
+.container { max-width: 480px; margin: 0 auto; padding: 1rem; }
+.card { background: #fff; border-radius: 12px; padding: 1rem; box-shadow: 0 2px 8px rgba(0,0,0,.08); }
+.image-wrap { touch-action: pan-y; margin-bottom: 1rem; }
+.image-pair { display: flex; flex-direction: column; gap: 1rem; }
+.image-block { display: flex; flex-direction: column; gap: .35rem; }
+.image-label { font-size: .8rem; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; color: #666; }
+.image-block img { width: 100%; border-radius: 8px; background: #eee; }
+.expiry { font-size: .85rem; color: #666; }
+label, .field { display: block; margin-bottom: .75rem; }
+input { width: 100%; padding: .5rem; margin-top: .25rem; }
+.chips { display: flex; flex-wrap: wrap; gap: .5rem; margin: .5rem 0; }
+.chip { border: 1px solid #ccc; background: #fff; border-radius: 999px; padding: .35rem .75rem; cursor: pointer; }
+.chip.active { background: #111; color: #fff; border-color: #111; }
+.actions { display: flex; gap: .5rem; flex-wrap: wrap; margin: 1rem 0; }
+button { flex: 1; padding: .6rem; border-radius: 8px; border: 1px solid #ccc; background: #fff; cursor: pointer; }
+button.approve { background: #0a7; color: #fff; border-color: #0a7; }
+button.reject { background: #c33; color: #fff; border-color: #c33; }
+button.finish { width: 100%; background: #111; color: #fff; border-color: #111; }
