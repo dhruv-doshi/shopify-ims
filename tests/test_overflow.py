@@ -17,7 +17,7 @@ def test_no_overflow_on_small_answer():
 async def test_handle_question_returns_text_for_small(monkeypatch, session):
     from src.domain import queries
 
-    async def fake_answer(question, rows):
+    async def fake_answer(question, rows, source="local"):
         return {"mode": "text", "telegram_text": "You have 2 products."}
 
     async def fake_rows(s):
@@ -37,7 +37,7 @@ async def test_handle_question_returns_link_for_large(monkeypatch, session):
 
     rows = [{"name": f"Item {i}", "price": 1, "quantity": 1, "decision": "approved"} for i in range(9)]
 
-    async def fake_answer(question, inventory):
+    async def fake_answer(question, inventory, source="local"):
         return {
             "mode": "link",
             "telegram_text": "full list",

@@ -43,6 +43,13 @@ The app exchanges those credentials for a short-lived access token automatically
 
 Products are created with title, price, compare-at (discount), inventory quantity, and the generated product image.
 
+Optional scopes for demo orders via `/seed_shopify`: `write_draft_orders` and `read_orders`.
+
+## Dashboard and demo catalog
+
+- `/dashboard [question]` — builds a read-only analytics page from **local** mock inventory and sales (`MockProduct` / `MockSale`). Does not write to Shopify. Subtitle labels this as demo analytics.
+- `/seed_shopify` — creates real products on your dev store titled `IMS Seed — …` using the same `create_product()` path as review finish. Idempotent (skips existing titles). Best-effort demo draft orders if scopes allow.
+
 ## Tests
 
 ```bash

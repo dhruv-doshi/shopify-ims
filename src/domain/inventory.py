@@ -9,7 +9,12 @@ async def sync_product_to_shopify(session: AsyncSession, product: ProductDraft) 
     if product.decision != "approved":
         return {"status": "skipped", "error": "not approved"}
     if product.shopify_status == "ok" and product.shopify_product_id:
-        return {"status": "ok", "product_id": product.shopify_product_id, "error": None}
+        return {
+            "status": "ok",
+            "product_id": product.shopify_product_id,
+            "variant_id": None,
+            "error": None,
+        }
 
     result = await create_product(product)
     product.shopify_status = result["status"]

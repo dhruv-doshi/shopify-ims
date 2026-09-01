@@ -7,8 +7,10 @@ from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandl
 from src.bot.batching import PendingPhoto, PhotoBatcher
 from src.core.config import get_settings
 from src.domain.batches import PhotoInput, create_batch, process_batch
+from src.domain.dashboard import create_dashboard
 from src.domain.inventory import sync_unsent_products
 from src.domain.queries import handle_question
+from src.domain.shopify_seed import seed_shopify_catalog
 from src.infrastructure.database import async_session_factory
 
 logger = logging.getLogger(__name__)
@@ -58,7 +60,9 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     await update.message.reply_text(
         "Send product photos (one or many). After a short pause I'll create a review link. "
         "Ask questions in text to query your inventory.\n"
-        "/sync — push approved items to Shopify that haven't been uploaded yet."
+        "/sync — push approved items to Shopify that haven't been uploaded yet.\n"
+        "/dashboard [question] — read-only analytics page (local demo sales).\n"
+        "/seed_shopify — create demo products (and orders if allowed) on the Shopify store."
     )
 
 
@@ -77,6 +81,52 @@ async def sync_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         f"Sync done. Total: {result['total']}, created: {result['ok']}, "
         f"errors: {result['errors']}, skipped: {result['skipped']}"
     )
+
+
+async def dashboard_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not update.effective_user or not update.message:
+        return
+    settings = get_settings()
+    if not settings.is_user_allowed(update.effective_user.id):
+        await update.message.reply_text("You are not authorized to use this bot.")
+        return
+    prompt = " ".join(context.args).strip() if context.args else "overview"
+    await update.message.reply_text("Building dashboard… (this can take ~15 seconds)")
+    try:
+        async with async_session_factory() as session:
+            result = await create_dashboard(session, prompt, update.effective_chat.id)
+        msg = f"{result['telegram_summary']}\n\n{result['url']}"
+        if "localhost" in settings.app_public_url or "127.0.0.1" in settings.app_public_url:
+            msg += "\n\nNote: use a public URL (e.g. ngrok) to open this on your phone."
+        await update.message.reply_text(msg)
+    except Exception:
+        logger.exception("Dashboard command failed")
+        await update.message.reply_text("Dashboard failed. Check server logs and try again.")
+
+
+async def seed_shopify_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not update.effective_user or not update.message:
+        return
+    settings = get_settings()
+    if not settings.is_user_allowed(update.effective_user.id):
+        return
+    if not settings.shopify_configured:
+        await update.message.reply_text("Shopify is not configured in .env")
+        return
+    await update.message.reply_text(
+        "Seeding Shopify dev store with demo products (IMS Seed — …). This writes real products."
+    )
+    async with async_session_factory() as session:
+        result = await seed_shopify_catalog(session)
+    lines = [
+        f"Products created: {result['products_created']}",
+        f"Products skipped: {result['products_skipped']}",
+        f"Orders created: {result['orders_created']}",
+        f"Orders skipped: {result['orders_skipped']}",
+    ]
+    if result["errors"]:
+        lines.append("Errors: " + "; ".join(result["errors"][:3]))
+    await update.message.reply_text("\n".join(lines))
 
 
 def get_bot():
@@ -140,6 +190,8 @@ def build_bot_application() -> Application | None:
 
     app.add_handler(CommandHandler("start", start_command))
     app.add_handler(CommandHandler("sync", sync_command))
+    app.add_handler(CommandHandler("dashboard", dashboard_command))
+    app.add_handler(CommandHandler("seed_shopify", seed_shopify_command))
     app.add_handler(MessageHandler(filters.PHOTO, photo_handler))
     app.add_handler(MessageHandler(filters.Document.IMAGE, photo_handler))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_handler))

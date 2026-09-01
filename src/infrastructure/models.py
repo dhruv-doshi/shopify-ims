@@ -79,5 +79,32 @@ class SwipeEvent(Base):
     product: Mapped["ProductDraft"] = relationship(back_populates="swipes")
 
 
+class MockProduct(Base):
+    __tablename__ = "mock_products"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    name: Mapped[str] = mapped_column(String(256))
+    sku: Mapped[str] = mapped_column(String(64))
+    price: Mapped[Decimal] = mapped_column(Numeric(10, 2))
+    quantity: Mapped[int] = mapped_column(Integer, default=0)
+    category: Mapped[str] = mapped_column(String(64), default="Jewelry")
+    source: Mapped[str] = mapped_column(String(16), default="fixture")
+    draft_id: Mapped[int | None] = mapped_column(ForeignKey("product_drafts.id"), nullable=True)
+
+    sales: Mapped[list["MockSale"]] = relationship(back_populates="product")
+
+
+class MockSale(Base):
+    __tablename__ = "mock_sales"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    product_id: Mapped[int] = mapped_column(ForeignKey("mock_products.id"))
+    qty: Mapped[int] = mapped_column(Integer, default=1)
+    unit_price: Mapped[Decimal] = mapped_column(Numeric(10, 2))
+    sold_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+    product: Mapped["MockProduct"] = relationship(back_populates="sales")
+
+
 def dumps_options(values: list) -> list:
     return json.loads(json.dumps(values))

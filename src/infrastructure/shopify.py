@@ -76,6 +76,60 @@ GET_LOCATION = """
 }
 """
 
+LIST_SEED_PRODUCTS = """
+query {
+  products(first: 50, query: "title:IMS Seed") {
+    edges {
+      node {
+        title
+        variants(first: 1) {
+          nodes { id }
+        }
+      }
+    }
+  }
+}
+"""
+
+LIST_INVENTORY_PRODUCTS = """
+query {
+  products(first: 100) {
+    edges {
+      node {
+        id
+        title
+        status
+        variants(first: 10) {
+          nodes {
+            id
+            price
+            inventoryQuantity
+          }
+        }
+      }
+    }
+  }
+}
+"""
+
+DRAFT_ORDER_CREATE = """
+mutation draftOrderCreate($input: DraftOrderInput!) {
+  draftOrderCreate(input: $input) {
+    draftOrder { id }
+    userErrors { field message }
+  }
+}
+"""
+
+DRAFT_ORDER_COMPLETE = """
+mutation draftOrderComplete($id: ID!) {
+  draftOrderComplete(id: $id) {
+    draftOrder { id }
+    userErrors { field message }
+  }
+}
+"""
+
 
 def _compare_at(price: Decimal, discount_percent: int) -> str | None:
     if discount_percent <= 0:
@@ -185,7 +239,7 @@ async def _upload_product_image(client: httpx.AsyncClient, product_id: str, imag
 async def create_product(draft: ProductDraft) -> dict:
     settings = get_settings()
     if not settings.shopify_configured:
-        return {"status": "skipped", "product_id": None, "error": None}
+        return {"status": "skipped", "product_id": None, "variant_id": None, "error": None}
 
     try:
         async with httpx.AsyncClient(timeout=120) as client:
@@ -198,7 +252,12 @@ async def create_product(draft: ProductDraft) -> dict:
             err = _user_errors(create_payload)
             product = (create_payload or {}).get("product")
             if err or not product:
-                return {"status": "error", "product_id": None, "error": err or "No product returned"}
+                return {
+                    "status": "error",
+                    "product_id": None,
+                    "variant_id": None,
+                    "error": err or "No product returned",
+                }
 
             variant = product["variants"]["nodes"][0]
             variant_input: dict = {"id": variant["id"], "price": str(draft.price)}
@@ -214,7 +273,12 @@ async def create_product(draft: ProductDraft) -> dict:
             update_payload = update_body.get("data", {}).get("productVariantsBulkUpdate")
             err = _user_errors(update_payload)
             if err:
-                return {"status": "error", "product_id": product["id"], "error": err}
+                return {
+                    "status": "error",
+                    "product_id": product["id"],
+                    "variant_id": variant["id"],
+                    "error": err,
+                }
 
             if draft.quantity > 0:
                 loc_body = await _graphql(client, GET_LOCATION)
@@ -250,7 +314,126 @@ async def create_product(draft: ProductDraft) -> dict:
                 if img_err:
                     logger.warning("Shopify image upload failed for %s: %s", draft.name, img_err)
 
-            return {"status": "ok", "product_id": product["id"], "error": None}
+            return {
+                "status": "ok",
+                "product_id": product["id"],
+                "variant_id": variant["id"],
+                "error": None,
+            }
     except (httpx.HTTPError, RuntimeError) as exc:
         logger.warning("Shopify create failed: %s", exc)
-        return {"status": "error", "product_id": None, "error": str(exc)}
+        return {"status": "error", "product_id": None, "variant_id": None, "error": str(exc)}
+
+
+async def list_inventory_products() -> list[dict]:
+    settings = get_settings()
+    if not settings.shopify_configured:
+        return []
+    async with httpx.AsyncClient(timeout=60) as client:
+        body = await _graphql(client, LIST_INVENTORY_PRODUCTS)
+    edges = body.get("data", {}).get("products", {}).get("edges") or []
+    rows = []
+    for edge in edges:
+        node = edge.get("node") or {}
+        variants = (node.get("variants") or {}).get("nodes") or []
+        if not variants:
+            rows.append(
+                {
+                    "id": node.get("id"),
+                    "name": node.get("title") or "Untitled",
+                    "price": 0.0,
+                    "discount_percent": 0,
+                    "quantity": 0,
+                    "decision": (node.get("status") or "unknown").lower(),
+                    "shopify_status": "ok",
+                    "source": "shopify",
+                }
+            )
+            continue
+        total_qty = sum(int(v.get("inventoryQuantity") or 0) for v in variants)
+        rows.append(
+            {
+                "id": node.get("id"),
+                "name": node.get("title") or "Untitled",
+                "price": float(variants[0].get("price") or 0),
+                "discount_percent": 0,
+                "quantity": total_qty,
+                "decision": (node.get("status") or "unknown").lower(),
+                "shopify_status": "ok",
+                "source": "shopify",
+            }
+        )
+    return rows
+
+
+async def list_seed_products() -> list[dict]:
+    settings = get_settings()
+    if not settings.shopify_configured:
+        return []
+    try:
+        async with httpx.AsyncClient(timeout=60) as client:
+            body = await _graphql(client, LIST_SEED_PRODUCTS)
+        edges = body.get("data", {}).get("products", {}).get("edges") or []
+        out = []
+        for edge in edges:
+            node = edge.get("node") or {}
+            variants = (node.get("variants") or {}).get("nodes") or []
+            out.append(
+                {
+                    "title": node.get("title") or "",
+                    "variant_id": variants[0]["id"] if variants else None,
+                }
+            )
+        return out
+    except (httpx.HTTPError, RuntimeError) as exc:
+        logger.warning("Shopify list seed products failed: %s", exc)
+        return []
+
+
+async def create_demo_orders(variant_ids: list[str], count: int = 4) -> dict:
+    if not variant_ids:
+        return {"orders_created": 0, "orders_skipped": count, "error": "No variant IDs"}
+    settings = get_settings()
+    if not settings.shopify_configured:
+        return {"orders_created": 0, "orders_skipped": count, "error": "Shopify not configured"}
+
+    created = 0
+    skipped = 0
+    last_error: str | None = None
+    try:
+        async with httpx.AsyncClient(timeout=60) as client:
+            for i in range(count):
+                variant_id = variant_ids[i % len(variant_ids)]
+                create_body = await _graphql(
+                    client,
+                    DRAFT_ORDER_CREATE,
+                    {"input": {"lineItems": [{"variantId": variant_id, "quantity": 1}]}},
+                )
+                create_payload = create_body.get("data", {}).get("draftOrderCreate")
+                err = _user_errors(create_payload)
+                draft = (create_payload or {}).get("draftOrder")
+                if err or not draft:
+                    skipped += count - i
+                    last_error = err or "draftOrderCreate failed"
+                    break
+                complete_body = await _graphql(
+                    client,
+                    DRAFT_ORDER_COMPLETE,
+                    {"id": draft["id"]},
+                )
+                complete_payload = complete_body.get("data", {}).get("draftOrderComplete")
+                err = _user_errors(complete_payload)
+                if err:
+                    skipped += count - i
+                    last_error = err
+                    break
+                created += 1
+    except (httpx.HTTPError, RuntimeError) as exc:
+        skipped = count - created
+        last_error = str(exc)
+
+    return {
+        "orders_created": created,
+        "orders_skipped": skipped,
+        "error": last_error,
+    }
