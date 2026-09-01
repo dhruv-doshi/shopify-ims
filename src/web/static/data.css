@@ -1,15 +1,46 @@
 body { font-family: system-ui, sans-serif; margin: 0; background: #f5f5f5; color: #111; }
 .container { max-width: 900px; margin: 0 auto; padding: 1rem; }
 .hidden { display: none !important; }
+.error-state {
+  background: #fde8e8;
+  border: 1px solid #f5b5b5;
+  border-radius: 8px;
+  padding: 1rem;
+  margin-bottom: 1rem;
+}
+.error-state h2 { margin: 0 0 .5rem; font-size: 1.1rem; }
+.error-state p { margin: 0; color: #555; }
 .banner {
   background: #fff3cd;
   border: 1px solid #ffe08a;
   border-radius: 6px;
   padding: .75rem 1rem;
-  margin-bottom: 1rem;
+  margin-bottom: .75rem;
   font-size: .95rem;
 }
-.subtitle { color: #555; margin-top: -.25rem; }
+.demo-badge {
+  display: inline-block;
+  background: #e8f0fe;
+  color: #1a4f9c;
+  border: 1px solid #b6d0fa;
+  border-radius: 999px;
+  padding: .35rem .75rem;
+  font-size: .8rem;
+  font-weight: 600;
+  margin-bottom: .75rem;
+}
+.subtitle { color: #444; margin-top: -.25rem; line-height: 1.4; }
+.meta { color: #666; font-size: .9rem; margin: .5rem 0 1rem; }
+.prompt-chips { display: flex; flex-wrap: wrap; gap: .5rem; margin-bottom: 1rem; }
+.prompt-chip {
+  border: 1px solid #ccc;
+  background: #fff;
+  border-radius: 999px;
+  padding: .4rem .85rem;
+  font-size: .85rem;
+  cursor: pointer;
+}
+.prompt-chip.active { background: #111; color: #fff; border-color: #111; }
 .kpi-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
@@ -36,21 +67,50 @@ body { font-family: system-ui, sans-serif; margin: 0; background: #f5f5f5; color
 .chart-block h3, .table-block h3 { margin: 0 0 .75rem; font-size: 1rem; }
 table { width: 100%; border-collapse: collapse; background: #fff; }
 th, td { border: 1px solid #ddd; padding: .5rem; text-align: left; }
-.chart, .bar-chart { display: flex; align-items: flex-end; gap: .5rem; height: 200px; margin: 1rem 0; }
-.bar { flex: 1; background: #111; min-width: 24px; border-radius: 4px 4px 0 0; position: relative; }
+.chart, .bar-chart {
+  display: flex;
+  align-items: flex-end;
+  gap: .35rem;
+  height: 200px;
+  margin: 1rem 0 2.5rem;
+  padding-bottom: .25rem;
+  overflow-x: auto;
+}
+.bar {
+  flex: 1 0 28px;
+  max-width: 56px;
+  background: #111;
+  min-width: 24px;
+  border-radius: 4px 4px 0 0;
+  position: relative;
+}
 .bar span {
   position: absolute;
-  bottom: -1.5rem;
+  bottom: -2rem;
   left: 50%;
-  transform: translateX(-50%);
-  font-size: .75rem;
+  transform: translateX(-50%) rotate(-35deg);
+  transform-origin: top center;
+  font-size: .7rem;
+  max-width: 4.5rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
 .line-chart { width: 100%; max-width: 480px; height: auto; display: block; }
 .line-labels {
   display: flex;
   justify-content: space-between;
-  font-size: .75rem;
+  gap: .25rem;
+  font-size: .7rem;
   color: #666;
   margin-top: .25rem;
+  overflow: hidden;
+}
+.line-labels span {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: center;
 }

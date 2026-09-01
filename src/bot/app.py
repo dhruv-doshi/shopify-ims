@@ -5,12 +5,14 @@ from telegram import Update
 from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters
 
 from src.bot.batching import PendingPhoto, PhotoBatcher
+from src.bot.commands import register_bot_commands
 from src.core.config import get_settings
 from src.domain.batches import PhotoInput, create_batch, process_batch
 from src.domain.dashboard import create_dashboard
 from src.domain.inventory import sync_unsent_products
 from src.domain.queries import handle_question
 from src.domain.shopify_seed import seed_shopify_catalog
+from src.domain.status import collect_status, format_status
 from src.infrastructure.database import async_session_factory
 
 logger = logging.getLogger(__name__)
@@ -61,8 +63,9 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         "Send product photos (one or many). After a short pause I'll create a review link. "
         "Ask questions in text to query your inventory.\n"
         "/sync — push approved items to Shopify that haven't been uploaded yet.\n"
-        "/dashboard [question] — read-only analytics page (local demo sales).\n"
-        "/seed_shopify — create demo products (and orders if allowed) on the Shopify store."
+        "/dashboard [question] — read-only analytics (live Shopify inventory + demo sales).\n"
+        "/seed_shopify — create demo products (and orders if allowed) on the Shopify store.\n"
+        "/status — Shopify connection, product count, unsent drafts, last batch."
     )
 
 
@@ -95,7 +98,11 @@ async def dashboard_command(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     try:
         async with async_session_factory() as session:
             result = await create_dashboard(session, prompt, update.effective_chat.id)
-        msg = f"{result['telegram_summary']}\n\n{result['url']}"
+        if result.get("inventory_source") == "shopify":
+            label = "Demo sales charts · live inventory"
+        else:
+            label = "Demo sales charts · local inventory"
+        msg = f"{label}\n{result['telegram_summary']}\n\n{result['url']}"
         if "localhost" in settings.app_public_url or "127.0.0.1" in settings.app_public_url:
             msg += "\n\nNote: use a public URL (e.g. ngrok) to open this on your phone."
         await update.message.reply_text(msg)
@@ -127,6 +134,17 @@ async def seed_shopify_command(update: Update, context: ContextTypes.DEFAULT_TYP
     if result["errors"]:
         lines.append("Errors: " + "; ".join(result["errors"][:3]))
     await update.message.reply_text("\n".join(lines))
+
+
+async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not update.effective_user or not update.message:
+        return
+    settings = get_settings()
+    if not settings.is_user_allowed(update.effective_user.id):
+        return
+    async with async_session_factory() as session:
+        data = await collect_status(session)
+    await update.message.reply_text(format_status(data))
 
 
 def get_bot():
@@ -172,7 +190,7 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         result = await handle_question(session, update.message.text, update.effective_chat.id)
 
     if result["mode"] == "link":
-        await update.message.reply_text(f"Report ready: {result['url']}")
+        await update.message.reply_text(result.get("text") or f"Report ready: {result['url']}")
     else:
         await update.message.reply_text(result["text"])
 
@@ -184,7 +202,7 @@ def build_bot_application() -> Application | None:
         return None
 
     global _bot_app, _batcher
-    app = Application.builder().token(settings.telegram_bot_token).build()
+    app = Application.builder().token(settings.telegram_bot_token).post_init(register_bot_commands).build()
     _bot_app = app
     _batcher = PhotoBatcher(on_flush=_flush_batch)
 
@@ -192,6 +210,7 @@ def build_bot_application() -> Application | None:
     app.add_handler(CommandHandler("sync", sync_command))
     app.add_handler(CommandHandler("dashboard", dashboard_command))
     app.add_handler(CommandHandler("seed_shopify", seed_shopify_command))
+    app.add_handler(CommandHandler("status", status_command))
     app.add_handler(MessageHandler(filters.PHOTO, photo_handler))
     app.add_handler(MessageHandler(filters.Document.IMAGE, photo_handler))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_handler))

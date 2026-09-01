@@ -162,7 +162,7 @@ def _cap_dashboard_spec(spec: dict[str, Any], prompt: str) -> dict[str, Any]:
     summary = str(spec.get("telegram_summary") or "")[:500]
     return {
         "title": str(spec.get("title") or "Inventory dashboard"),
-        "subtitle": str(spec.get("subtitle") or "Demo analytics — local mock sales"),
+        "subtitle": str(spec.get("subtitle") or "Demo analytics — local mock inventory and sales (not Shopify)"),
         "prompt": prompt,
         "telegram_summary": summary,
         "kpis": kpis,
@@ -175,12 +175,17 @@ def fallback_dashboard_spec(prompt: str, snapshot: dict[str, Any]) -> dict[str, 
     kpis_data = snapshot.get("kpis") or {}
     sales_by_day = list(snapshot.get("sales_by_day") or [])[-7:]
     sales_by_product = list(snapshot.get("sales_by_product") or [])[:10]
+    inventory_source = snapshot.get("inventory_source", "local")
+    inv_hint = "Live Shopify" if inventory_source == "shopify" else "Demo data"
+    sales_hint = "Demo sales"
 
     kpis = [
-        {"label": "Units on hand", "value": str(kpis_data.get("units_on_hand", 0)), "hint": ""},
-        {"label": "Inventory value", "value": f"${kpis_data.get('inventory_value', 0):,.2f}", "hint": ""},
-        {"label": "Revenue (30d)", "value": f"${kpis_data.get('revenue_30d', 0):,.2f}", "hint": "Demo analytics"},
-        {"label": "Units sold (30d)", "value": str(kpis_data.get("units_sold_30d", 0)), "hint": ""},
+        {"label": "Products", "value": str(snapshot.get("product_count", 0)), "hint": inv_hint},
+        {"label": "Units on hand", "value": str(kpis_data.get("units_on_hand", 0)), "hint": inv_hint},
+        {"label": "Low stock (≤5)", "value": str(kpis_data.get("low_stock_count", 0)), "hint": inv_hint},
+        {"label": "Inventory value", "value": f"${kpis_data.get('inventory_value', 0):,.2f}", "hint": inv_hint},
+        {"label": "Revenue (30d)", "value": f"${kpis_data.get('revenue_30d', 0):,.2f}", "hint": sales_hint},
+        {"label": "Units sold (30d)", "value": str(kpis_data.get("units_sold_30d", 0)), "hint": sales_hint},
     ]
 
     charts = []
@@ -218,14 +223,20 @@ def fallback_dashboard_spec(prompt: str, snapshot: dict[str, Any]) -> dict[str, 
         )
 
     summary = (
-        f"Demo analytics for “{prompt}”. "
-        f"{kpis_data.get('units_on_hand', 0)} units on hand; "
-        f"${kpis_data.get('revenue_30d', 0):,.2f} revenue (30d)."
+        f"Dashboard for “{prompt}”. "
+        f"{snapshot.get('product_count', 0)} products ({inv_hint.lower()}); "
+        f"{kpis_data.get('low_stock_count', 0)} low stock; "
+        f"${kpis_data.get('revenue_30d', 0):,.2f} demo revenue (30d)."
+    )
+    subtitle = (
+        "Live inventory from Shopify · sales charts use demo analytics (not Shopify orders)"
+        if inventory_source == "shopify"
+        else "Demo analytics — local mock inventory and sales (not Shopify)"
     )
     return _cap_dashboard_spec(
         {
             "title": "Inventory dashboard",
-            "subtitle": "Demo analytics — local mock sales (not Shopify orders)",
+            "subtitle": subtitle,
             "telegram_summary": summary[:500],
             "kpis": kpis,
             "charts": charts,
@@ -247,7 +258,7 @@ async def build_dashboard_spec(prompt: str, snapshot: dict[str, Any]) -> dict[st
                 "role": "system",
                 "content": (
                     "Build a read-only seller dashboard spec from inventory snapshot JSON. "
-                    "Return ONLY JSON with keys: title, subtitle (mention Demo analytics), "
+                    "Return ONLY JSON with keys: title, subtitle (clarify live Shopify inventory vs demo sales), "
                     "telegram_summary (max 500 chars), kpis (array of {label,value,hint}), "
                     "charts (array of {type: bar|line, title, labels, values, values_b}), "
                     "tables (array of {title, columns, rows}). "

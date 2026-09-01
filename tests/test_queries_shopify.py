@@ -46,4 +46,5 @@ async def test_handle_question_empty_shopify_store(monkeypatch, session):
 
     result = await handle_question(session, "how many products?", 1)
     assert result["mode"] == "text"
+    assert "Live Shopify: 0 products" in result["text"]
     assert "no products" in result["text"].lower()

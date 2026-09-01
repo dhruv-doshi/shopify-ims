@@ -1,6 +1,8 @@
 # Shopify IMS
 
-Telegram-first inventory management with product-shot generation and swipe review links.
+Telegram-first inventory management: send product photos, review generated shots, push approved items to Shopify, then ask inventory questions or open a short-lived analytics dashboard.
+
+See [TECH.md](TECH.md) for stack, tables, APIs, and data flow.
 
 ## Setup
 
@@ -15,10 +17,8 @@ Fill in `.env`:
 
 - `TELEGRAM_BOT_TOKEN` — from [@BotFather](https://t.me/BotFather)
 - `OPENROUTER_API_KEY` — from [OpenRouter](https://openrouter.ai/)
-- `APP_PUBLIC_URL` — public URL for review links (use [ngrok](https://ngrok.com/) locally)
+- `APP_PUBLIC_URL` — public URL for review/dashboard links (use [ngrok](https://ngrok.com/) locally)
 - Optional Shopify Partner dev store: `SHOPIFY_STORE_DOMAIN`, `SHOPIFY_CLIENT_ID`, `SHOPIFY_CLIENT_SECRET`
-
-Approved products are pushed to Shopify on **Finish review** (name, price, discount, quantity, and product image). Use `/sync` in Telegram to retry items that failed or were approved before Shopify was configured.
 
 ## Run
 
@@ -31,24 +31,39 @@ Health check: `GET http://127.0.0.1:8000/health`
 
 Without `TELEGRAM_BOT_TOKEN`, the web API still runs for local UI testing.
 
+## Telegram commands
+
+| Command | What it does |
+|---|---|
+| Photos | After a short pause, builds a review link `/r/{token}` |
+| Text questions | Answers from **live Shopify** inventory when Shopify is configured |
+| `/sync` | Pushes approved local drafts that never made it to Shopify |
+| `/dashboard [prompt]` | Short-lived page: **live Shopify inventory KPIs** + **demo sales charts** |
+| `/seed_shopify` | Writes real `IMS Seed — …` products to the store (optional demo orders) |
+| `/status` | Shopify OK, product count, unsent drafts, last batch |
+
+The bot registers these in the Telegram command menu on startup.
+
 ## Shopify (developer mode)
 
 1. Create a free [Shopify Partner](https://partners.shopify.com/) account.
-2. Create a development store from the [Dev Dashboard](https://dev.shopify.com/dashboard) (Dev stores sidebar).
-3. Create an app in the Dev Dashboard with scopes: `write_products`, `read_products`, `write_inventory`.
+2. Create a development store from the [Dev Dashboard](https://dev.shopify.com/dashboard).
+3. Create an app with scopes: `write_products`, `read_products`, `write_inventory`.
 4. Install the app on your dev store.
-5. In the app **Settings**, copy **Client ID** and **Client secret** into `.env`.
+5. Copy **Client ID** and **Client secret** into `.env`.
 
-The app exchanges those credentials for a short-lived access token automatically (Shopify client credentials grant). You do not paste a static `shpat_` token unless you have one from a legacy custom app.
+The app uses the Shopify client credentials grant. Optional extra scopes for `/seed_shopify` orders: `write_draft_orders`, `read_orders`.
 
-Products are created with title, price, compare-at (discount), inventory quantity, and the generated product image.
+Approved products are created with title, price, compare-at (discount), inventory quantity, and product image.
 
-Optional scopes for demo orders via `/seed_shopify`: `write_draft_orders` and `read_orders`.
+## Data sources (important)
 
-## Dashboard and demo catalog
-
-- `/dashboard [question]` — builds a read-only analytics page from **local** mock inventory and sales (`MockProduct` / `MockSale`). Does not write to Shopify. Subtitle labels this as demo analytics.
-- `/seed_shopify` — creates real products on your dev store titled `IMS Seed — …` using the same `create_product()` path as review finish. Idempotent (skips existing titles). Best-effort demo draft orders if scopes allow.
+| Feature | Inventory | Sales / charts |
+|---|---|---|
+| Photo → review → Finish | Local drafts, then **write** to Shopify | — |
+| Text Q&A | **Shopify** (falls back to local drafts if Shopify is not configured) | — |
+| `/dashboard` | **Shopify** when configured, else local mock catalog | **Always local demo sales** (`MockSale`) |
+| `/seed_shopify` | **Writes** to Shopify | Also seeds local mock analytics if empty |
 
 ## Tests
 

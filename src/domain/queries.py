@@ -71,10 +71,15 @@ async def handle_question(session: AsyncSession, question: str, chat_id: int) ->
 
     if not rows:
         if settings.shopify_configured:
-            return {"mode": "text", "text": "Your Shopify store has no products yet."}
-        return {"mode": "text", "text": "No inventory data available yet."}
+            return {"mode": "text", "text": "Live Shopify: 0 products\nYour Shopify store has no products yet."}
+        return {"mode": "text", "text": "Local drafts: 0 products\nNo inventory data available yet."}
 
     source = rows[0].get("source", "local")
+    prefix = (
+        f"Live Shopify: {len(rows)} products"
+        if source == "shopify"
+        else f"Local drafts: {len(rows)} products"
+    )
     answer = await answer_inventory_question(question, rows, source=source)
     if should_overflow(answer, question):
         payload = {
@@ -87,12 +92,15 @@ async def handle_question(session: AsyncSession, question: str, chat_id: int) ->
         }
         link = await create_link(session, kind="data", telegram_chat_id=chat_id, payload=payload)
         await session.commit()
+        url = f"{settings.app_public_url}/d/{link.token}"
         return {
             "mode": "link",
-            "url": f"{settings.app_public_url}/d/{link.token}",
+            "url": url,
+            "text": f"{prefix}\nReport ready: {url}",
         }
 
+    body = answer.get("telegram_text") or "No answer."
     return {
         "mode": "text",
-        "text": answer.get("telegram_text") or "No answer.",
+        "text": f"{prefix}\n{body}",
     }

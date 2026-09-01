@@ -28,6 +28,7 @@ async def test_handle_question_returns_text_for_small(monkeypatch, session):
 
     result = await queries.handle_question(session, "how many?", 1)
     assert result["mode"] == "text"
+    assert "Local drafts: 2 products" in result["text"]
     assert "2 products" in result["text"]
 
 
@@ -55,3 +56,4 @@ async def test_handle_question_returns_link_for_large(monkeypatch, session):
     result = await queries.handle_question(session, "list all", 1)
     assert result["mode"] == "link"
     assert "/d/" in result["url"]
+    assert result["text"].startswith("Local drafts: 9 products")

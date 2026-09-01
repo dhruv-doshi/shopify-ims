@@ -8,9 +8,13 @@
 </head>
 <body>
   <main class="container" data-token="{{ token }}">
+    <div id="error-state" class="error-state hidden"></div>
     <div id="banner" class="banner hidden"></div>
+    <div id="demo-badge" class="demo-badge hidden">Demo sales data · not live Shopify orders</div>
     <h1 id="title">Inventory report</h1>
     <p id="subtitle" class="subtitle"></p>
+    <p id="meta" class="meta hidden"></p>
+    <div id="prompt-chips" class="prompt-chips hidden"></div>
     <p id="summary"></p>
     <div id="kpis" class="kpi-grid"></div>
     <div id="charts" class="charts"></div>

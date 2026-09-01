@@ -26,4 +26,5 @@ def format_finish_summary(result: dict) -> str:
         lines.append(f"Shopify errors: {result['shopify_errors']}")
     if result.get("shopify_ok", 0) > 0:
         lines.append("Check Products in your Shopify admin.")
+    lines.append("Review link is now closed.")
     return "\n".join(lines)

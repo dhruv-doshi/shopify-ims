@@ -57,8 +57,62 @@ async def test_fallback_spec_has_widgets(session):
     snapshot = await build_snapshot(session)
     spec = fallback_dashboard_spec("overview", snapshot)
     assert len(spec["kpis"]) >= 4
+    assert any("low stock" in k["label"].lower() for k in spec["kpis"])
     assert spec["charts"] or spec["tables"]
-    assert "Demo analytics" in spec["subtitle"]
+    assert "Demo" in spec["subtitle"] or "Shopify" in spec["subtitle"]
+
+
+@pytest.mark.asyncio
+async def test_build_snapshot_uses_shopify_inventory(monkeypatch, session):
+    await ensure_analytics_data(session)
+    monkeypatch.setenv("SHOPIFY_STORE_DOMAIN", "dev-store.myshopify.com")
+    monkeypatch.setenv("SHOPIFY_CLIENT_ID", "client-id")
+    monkeypatch.setenv("SHOPIFY_CLIENT_SECRET", "secret")
+    from src.core.config import get_settings
+
+    get_settings.cache_clear()
+
+    async def fake_shopify():
+        return [
+            {
+                "id": "gid://shopify/Product/1",
+                "name": "Live Ring",
+                "price": 99.0,
+                "quantity": 3,
+                "decision": "active",
+                "shopify_status": "ok",
+                "source": "shopify",
+            }
+        ]
+
+    monkeypatch.setattr("src.domain.analytics_seed.list_inventory_products", fake_shopify)
+    snapshot = await build_snapshot(session)
+    assert snapshot["inventory_source"] == "shopify"
+    assert snapshot["product_count"] == 1
+    assert snapshot["inventory"][0]["name"] == "Live Ring"
+    assert snapshot["kpis"]["low_stock_count"] == 1
+
+
+@pytest.mark.asyncio
+async def test_create_dashboard_includes_meta(monkeypatch, session):
+    async def fake_spec(prompt, snapshot):
+        return {
+            "title": "Dashboard",
+            "subtitle": "Test",
+            "telegram_summary": "Ready",
+            "kpis": [],
+            "charts": [],
+            "tables": [],
+        }
+
+    monkeypatch.setattr("src.domain.dashboard.build_dashboard_spec", fake_spec)
+    result = await create_dashboard(session, "overview", chat_id=1)
+    token = result["url"].rstrip("/").split("/")[-1]
+    link = await get_valid_link(session, token, kind="data")
+    assert link.payload_json["as_of"]
+    assert "product_count" in link.payload_json
+    assert link.payload_json["quick_prompts"] == ["overview", "low stock", "top sellers"]
+    assert "snapshot" in link.payload_json
 
 
 @pytest.mark.asyncio

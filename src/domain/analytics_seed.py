@@ -1,3 +1,4 @@
+import logging
 import random
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
@@ -5,7 +6,11 @@ from decimal import Decimal
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.core.config import get_settings
 from src.infrastructure.models import MockProduct, MockSale, ProductDraft
+from src.infrastructure.shopify import list_inventory_products
+
+logger = logging.getLogger(__name__)
 
 FIXTURE_PRODUCTS = [
     ("Gold Bangle Set", "BNG-001", Decimal("29.99"), 12, "Bangles"),
@@ -109,15 +114,58 @@ async def _append_new_drafts(session: AsyncSession) -> None:
     await session.commit()
 
 
+def _inventory_from_shopify(rows: list[dict]) -> list[dict]:
+    return [
+        {
+            "name": row["name"],
+            "sku": "",
+            "qty": row["quantity"],
+            "price": row["price"],
+            "category": "",
+        }
+        for row in rows
+    ]
+
+
+def _inventory_from_mock(products: list[MockProduct]) -> list[dict]:
+    return [
+        {
+            "name": p.name,
+            "sku": p.sku,
+            "qty": p.quantity,
+            "price": float(p.price),
+            "category": p.category,
+        }
+        for p in products
+    ]
+
+
 async def build_snapshot(session: AsyncSession) -> dict:
-    products = list((await session.execute(select(MockProduct).limit(40))).scalars())
+    mock_products = list((await session.execute(select(MockProduct).limit(40))).scalars())
     sales = list((await session.execute(select(MockSale))).scalars())
-    product_map = {p.id: p for p in products}
+    product_map = {p.id: p for p in mock_products}
     now = datetime.now(timezone.utc)
     cutoff = now - timedelta(days=30)
 
-    units_on_hand = sum(p.quantity for p in products)
-    inventory_value = float(sum(p.price * p.quantity for p in products))
+    settings = get_settings()
+    inventory_source = "local"
+    inventory: list[dict] = []
+    if settings.shopify_configured:
+        try:
+            shopify_rows = await list_inventory_products()
+            inventory = _inventory_from_shopify(shopify_rows)
+            inventory_source = "shopify"
+        except Exception as exc:
+            logger.warning("Dashboard Shopify inventory fetch failed; using local mock: %s", exc)
+
+    if not inventory:
+        inventory = _inventory_from_mock(mock_products)
+        inventory_source = "local"
+
+    units_on_hand = sum(p["qty"] for p in inventory)
+    inventory_value = float(sum(p["price"] * p["qty"] for p in inventory))
+    low_stock_count = sum(1 for p in inventory if p.get("qty", 0) <= 5)
+    product_count = len(inventory)
 
     recent_sales = [s for s in sales if s.sold_at.replace(tzinfo=timezone.utc) >= cutoff]
     revenue_30d = float(sum(s.qty * s.unit_price for s in recent_sales))
@@ -145,19 +193,14 @@ async def build_snapshot(session: AsyncSession) -> dict:
 
     return {
         "as_of": now.isoformat(),
-        "inventory": [
-            {
-                "name": p.name,
-                "sku": p.sku,
-                "qty": p.quantity,
-                "price": float(p.price),
-                "category": p.category,
-            }
-            for p in products
-        ],
+        "inventory_source": inventory_source,
+        "product_count": product_count,
+        "low_stock_count": low_stock_count,
+        "inventory": inventory,
         "kpis": {
             "units_on_hand": units_on_hand,
             "inventory_value": round(inventory_value, 2),
+            "low_stock_count": low_stock_count,
             "revenue_30d": round(revenue_30d, 2),
             "units_sold_30d": units_sold_30d,
             "orders_30d": orders_30d,
