@@ -1,217 +1,178 @@
-# Composer handoff — Telegram Shopify IMS (v1)
+# Composer handoff — dashboard + Shopify demo catalog
 
-You are implementing this repo from an empty tree except [`base_idea.txt`](base_idea.txt) and this file. Do not re-open architecture. Do not add a second app, Next.js, Celery, Redis, Postgres, Docker, Nginx, pi-agent, or Shopify OAuth.
+The v1 Telegram IMS **already exists**. Do **not** rebuild it. Implement this increment only.
+
+Do not add Next.js, Celery, Redis, Postgres, Docker, or a second app.
 
 Follow Karpathy: minimum code, no speculative features, every step has a verify check.
 
-## Locked decisions (do not change)
+## Goal
+
+Two complementary seeds so the seller can test **real Shopify** and **analytics** without mixing them accidentally:
+
+1. **Local analytics** (`MockProduct` / `MockSale`) — powers `/dashboard`. Never written to Shopify by `/dashboard`.
+2. **Shopify demo catalog** (`/seed-shopify`) — creates **real products** on the Partner dev store using the **same** `create_product()` path as Finish review / `/sync`. Optionally tries a few **demo draft orders** so admin/orders look real. If order APIs fail (missing scopes), products still succeed.
+
+## Locked decisions
 
 | Topic | Decision |
 |---|---|
-| Shape | **One FastAPI process**: bot + APIs + review/data HTML |
-| DB | SQLite via SQLAlchemy 2 async + aiosqlite |
-| Telegram | **Polling** (not webhook) in FastAPI lifespan |
-| Links | Unguessable UUID in URL is the only auth; default TTL 24h |
-| Review UI | **Carousel** (not Tinder stack). Still **record** pointer swipe left/right |
-| Approve | Swipe right = approve generated image. Left = reject. Rejected items never go to Shopify |
-| Autofill | Vision model: `name` + pick-lists for price, discount %, quantity (3–4 options each) + custom override |
-| LLM | OpenRouter only. Chat for vision/JSON/NL. `POST /api/v1/images` for product shots |
-| Shopify | Custom app on a **Partner development store**. Admin **GraphQL**. If token missing: local save, `shopify_status=skipped` |
-| Users | `TELEGRAM_ALLOWED_USER_ID` empty = allow anyone (solo test); if set, ignore other users |
-| Discount | Stored as percent. Shopify `compareAtPrice` = price / (1 - discount/100) when discount > 0, else omit compare-at |
+| Dashboard trigger | `/dashboard` + optional prompt. Empty = `"overview"` |
+| Dashboard output | Always short-lived `/d/{token}` + 2–4 line Telegram summary |
+| Dashboard | Read-only. No Shopify writes |
+| Dashboard data | Local mock catalog + mock sales. Label **Demo analytics**. Do not require Shopify Orders API to render charts |
+| Shopify catalog | `/seed-shopify` (allowed user only). Uses existing [`src/infrastructure/shopify.py`](src/infrastructure/shopify.py) `create_product` |
+| Shopify orders | Best-effort: 3–5 completed **draft orders** against seeded variants. Missing scopes → skip orders, report in Telegram |
+| Idempotency | Seed titles prefixed `IMS Seed — `. Skip a title if it already exists on Shopify. Local mock seed: if `MockProduct` count > 0, do not re-insert |
+| Text Q&A | Leave [`src/domain/queries.py`](src/domain/queries.py) unchanged |
+| Stack | Same FastAPI + SQLite `create_all` + Jinja/CSS |
+| Links | Existing `ShortLink` TTL |
 
-Human setup (you do not create these): Telegram bot token, OpenRouter key, optional ngrok `APP_PUBLIC_URL`, optional Shopify Partner store + custom app token.
+## Files
 
-## Repo layout (create exactly this)
+**Extend:** [`src/bot/app.py`](src/bot/app.py), [`src/core/llm.py`](src/core/llm.py), [`src/infrastructure/models.py`](src/infrastructure/models.py), [`src/infrastructure/shopify.py`](src/infrastructure/shopify.py) (optional SKU on variant if cheap; else unique titles only), [`src/web/templates/data.html`](src/web/templates/data.html), [`src/web/static/data.js`](src/web/static/data.js), [`src/web/static/data.css`](src/web/static/data.css).
 
-```
-shopify-ims/
-  COMPOSER.md                 # this file — do not expand with essays
-  base_idea.txt               # do not rewrite
-  README.md                   # run instructions only
-  pyproject.toml
-  .env.example
-  .gitignore                  # .env, data/, __pycache__, .venv
-  src/
-    __init__.py
-    main.py                   # app factory, mount static, include routers, start bot
-    core/
-      config.py
-      llm.py                  # OpenRouter chat completions
-      images.py               # OpenRouter /images
-    infrastructure/
-      database.py             # engine, session, create_all on startup
-      models.py               # ORM
-      shopify.py              # GraphQL client; no-op if no token
-    domain/
-      batches.py              # photo ingest, debounce, process item
-      review.py               # session + swipe + finalize
-      queries.py              # NL Q → telegram vs data link
-    api/
-      review.py               # GET page + JSON APIs for carousel
-      data.py                 # GET data page + JSON
-      media.py                # GET uploaded images (token-gated)
-    bot/
-      app.py                  # Application + handlers
-      batching.py             # per-chat debounce
-    web/
-      templates/
-        review.html
-        data.html
-      static/
-        review.js
-        review.css
-        data.js
-        data.css
-  tests/
-    conftest.py
-    test_links.py
-    test_swipe.py
-    test_overflow.py
-    test_shopify_skip.py
-  data/                       # gitignored; created at runtime
-```
+**Add:** [`src/domain/analytics_seed.py`](src/domain/analytics_seed.py), [`src/domain/dashboard.py`](src/domain/dashboard.py), [`src/domain/shopify_seed.py`](src/domain/shopify_seed.py), [`tests/test_dashboard.py`](tests/test_dashboard.py), [`tests/test_shopify_seed.py`](tests/test_shopify_seed.py).
 
-Python package: `src` on `PYTHONPATH` or `pyproject` with `packages = [{include = "src"}]` — pick one and make `python -m src.main` work.
+**README:** one short section: `/dashboard`, `/seed-shopify`, extra scopes `write_draft_orders` (and `read_orders` if required by the mutation you use).
 
-## Data model
+## Part A — local analytics (dashboard)
 
-`ShortLink`: `id`, `token` (uuid str unique), `kind` (`review` | `data`), `expires_at`, `payload_json` (for data pages), `telegram_chat_id`, `created_at`.
+### Models
 
-`Batch`: `id`, `telegram_user_id`, `telegram_chat_id`, `status` (`collecting` | `processing` | `ready` | `failed`), `review_link_id` FK nullable.
+`MockProduct`: `id`, `name`, `sku`, `price`, `quantity`, `category`, `source` (`draft` | `fixture`), `draft_id` nullable.
 
-`ProductDraft`: `id`, `batch_id`, `original_path`, `generated_path` nullable, `generation_failed` bool, `name`, `price` (numeric string or Decimal), `discount_percent`, `quantity` int, `price_options_json`, `discount_options_json`, `quantity_options_json`, `decision` (`pending` | `approved` | `rejected`), `shopify_status` (`unsent` | `skipped` | `ok` | `error`), `shopify_product_id` nullable, `shopify_error` nullable.
+`MockSale`: `id`, `product_id` FK, `qty`, `unit_price`, `sold_at`.
 
-`SwipeEvent`: `id`, `product_id`, `direction` (`left` | `right`), `dx`, `dy`, `client_ts` optional, `created_at`. Persist **every** swipe, including repeats; last swipe on a card sets `decision`.
+### `ensure_analytics_data(session)`
 
-Startup: `create_all`. No Alembic in v1.
+On `/dashboard` start:
 
-## Config (`.env.example`)
+1. If `MockProduct` count is 0:
+   - Approved `ProductDraft`s exist → copy to `MockProduct` (`source=draft`) + ~5 sales each over 30 days (deterministic from product id).
+   - Else → 12 jewelry/bangle fixtures (`source=fixture`) + ~60 sales. `random.Random(42)` only.
+2. If count > 0: no-op.
 
-```
-TELEGRAM_BOT_TOKEN=
-TELEGRAM_ALLOWED_USER_ID=
-OPENROUTER_API_KEY=
-OPENROUTER_BASE_URL=https://openrouter.ai/api/v1
-OPENROUTER_VISION_MODEL=google/gemini-2.5-flash
-OPENROUTER_IMAGE_MODEL=google/gemini-2.5-flash-image
-APP_PUBLIC_URL=http://127.0.0.1:8000
-LINK_TTL_HOURS=24
-PHOTO_BATCH_IDLE_SECONDS=3
-IMAGE_CONCURRENCY=3
-SHOPIFY_STORE_DOMAIN=
-SHOPIFY_ADMIN_ACCESS_TOKEN=
-SHOPIFY_API_VERSION=2025-01
-DATABASE_URL=sqlite+aiosqlite:///./data/app.db
-```
+Cheap extra (optional, keep small): new approved drafts without `draft_id` match get appended + a few sales.
 
-Never log tokens or API keys.
+### Snapshot
 
-## OpenRouter
+`build_snapshot(session)` — compact JSON: `as_of`, `inventory[]` (cap 40), `kpis` (units_on_hand, inventory_value, revenue_30d, units_sold_30d, orders_30d), `sales_by_product[]`, `sales_by_day[]` (30 days). Aggregate in Python/SQL. Do not send every sale row to the LLM.
 
-**Vision** (`src/core/llm.py`): `POST /chat/completions`, image as `data:image/jpeg;base64,...`. Force JSON. Schema:
+### LLM `build_dashboard_spec(prompt, snapshot)`
+
+JSON object only:
 
 ```json
 {
-  "name": "string",
-  "price_options": [9.99, 14.99, 19.99],
-  "discount_options": [0, 10, 20],
-  "quantity_options": [1, 5, 10]
+  "title": "string",
+  "subtitle": "string (mention Demo analytics)",
+  "prompt": "string",
+  "telegram_summary": "string, max ~500 chars",
+  "kpis": [{"label": "string", "value": "string", "hint": "string or empty"}],
+  "charts": [{"type": "bar or line", "title": "string", "labels": ["..."], "values": [0], "values_b": null}],
+  "tables": [{"title": "string", "columns": ["..."], "rows": [["..."]]}]
 }
 ```
 
-Set draft `name` to first name; set current price/discount/quantity to **first option**. If parse fails: name `"Untitled product"`, fallback options `[9.99,19.99,29.99]`, `[0,10,20]`, `[1,5,10]`.
+Caps: 6 KPIs, 3 charts, 2 tables, 12 labels, 15 rows. Widgets must follow the prompt. Fallback spec if OpenRouter fails: 4 KPIs + 7-day bars + top-products table.
 
-**Image** (`src/core/images.py`): `POST {OPENROUTER_BASE_URL}/images` (same host, path `/images` not `/chat/completions`).
+### `create_dashboard(session, prompt, chat_id)`
 
-```json
-{
-  "model": "<OPENROUTER_IMAGE_MODEL>",
-  "prompt": "Professional ecommerce product photograph of this exact item. Seamless studio background, even lighting, no props, no text, no people, no clutter. Centered, sharp, catalog style.",
-  "input_references": [{"type": "image_url", "image_url": {"url": "data:image/jpeg;base64,..."}}],
-  "aspect_ratio": "1:1"
-}
-```
+seed → snapshot → spec → `create_link(kind="data", payload=spec)` → `{url, telegram_summary}`.
 
-Read `data[0].b64_json`. Write JPEG/PNG under `data/uploads/{batch_id}/`. On HTTP/parse error: `generation_failed=true`, `generated_path=original_path`.
+### UI
 
-## Telegram
+New payload: banner `Read-only · generated for: {prompt}` + KPIs + charts + tables. Hide empty sections. CSS bars + simple SVG line. Old `{title, columns, rows, chart}` reports still work.
 
-- `/start` → one-line how to send photos and ask questions.
-- Photos (and photo documents): save bytes, add to per-chat buffer. After `PHOTO_BATCH_IDLE_SECONDS` with no new photo, freeze batch, reply “Processing N photos…”, run pipeline with `IMAGE_CONCURRENCY`, create review `ShortLink`, reply `{APP_PUBLIC_URL}/r/{token}`.
-- If `APP_PUBLIC_URL` is localhost, still send the link; mention they need a public URL on a phone.
-- Non-photo text → `domain/queries.py`.
-- Ignore unauthorized users when `TELEGRAM_ALLOWED_USER_ID` is set.
+### Bot `/dashboard`
 
-## HTTP
+Allowed users only. Prompt = text after command or `"overview"`. Reply summary + URL + localhost/ngrok note if needed.
 
-All JSON errors: `{"detail": "..."}`. Expired/missing token → 404.
+`/start` add:
 
-| Method | Path | Behavior |
-|---|---|---|
-| GET | `/r/{token}` | Review HTML if link kind=review and not expired |
-| GET | `/api/review/{token}` | `{expires_at, products: [{id, image_url, name, price, discount_percent, quantity, options, decision, generation_failed}]}` |
-| PATCH | `/api/review/{token}/products/{id}` | Update name/price/discount/quantity |
-| POST | `/api/review/{token}/products/{id}/swipe` | Body `{direction, dx, dy, client_ts?}`. Save SwipeEvent; set decision |
-| POST | `/api/review/{token}/finish` | Persist decisions; for approved, call Shopify; Telegram message with counts |
-| GET | `/media/{token}/{product_id}` | Serve generated (or original) image; same token as review |
-| GET | `/d/{token}` | Data HTML |
-| GET | `/api/data/{token}` | Payload for table/chart |
+- `/dashboard [question] — read-only analytics page (local demo sales)`
+- `/seed-shopify — create demo products (and orders if allowed) on the Shopify store`
 
-## Review UI
+## Part B — Shopify demo catalog (real store)
 
-Carousel: one product at a time, generated image, name input, chip rows for price/discount/qty, custom input, prev/next. Pointer: if horizontal movement > 60px, fire swipe API (right=approve, left=reject), then advance. Buttons “Reject” / “Approve” do the same. Record swipe even when using buttons (`dx/dy` 0). Finish button on last card or always visible. Do not require Shopify to use the page.
+### Fixture list (shared names)
 
-## Queries / overflow
+~8 jewelry titles, e.g. Gold Bangle Set, Glass Bangles, Kundan Bracelet, Silver Cuff, Pearl Bangle, Temple Jewelry Bangle, Meenakari Bangles, Oxidised Cuff. Prices 9.99–49.99, qty 3–20, discount 0 or 10. **Titles in Shopify must be** `IMS Seed — {name}` so they are obvious and skippable.
 
-Load local drafts + approved inventory (keep it simple: query `ProductDraft` where decision=approved, plus pending in recent batches). Send a compact table to the vision/text model: question + rows. Model returns JSON:
+Optional images: if `temp/bangle-test-images/*.jpg` exists, attach via existing image upload; if missing, create product without image (do not fail).
 
-```json
-{"mode": "text"|"link", "telegram_text": "...", "title": "...", "columns": ["..."], "rows": [[...]], "chart": {"labels": ["..."], "values": [0]} }
-```
+### `seed_shopify_catalog(session) -> dict`
 
-`mode=link` when rows > 8 **or** user asks for chart/graph/breakdown **or** telegram_text would exceed 1500 chars. Then store payload on a `data` ShortLink and send `/d/{token}`. Otherwise send `telegram_text` only. Chart on data page: one bar or line using a tiny chart lib or plain CSS bars — no heavy framework.
+Returns `{products_created, products_skipped, orders_created, orders_skipped, errors: []}`.
 
-## Shopify adapter
+1. If Shopify not configured → `{..., errors: ["Shopify not configured"]}`.
+2. Query existing products (GraphQL `products(first: 50, query: "title:IMS Seed")` or filter in Python). Skip titles already present.
+3. For each remaining fixture, build a transient `ProductDraft`-shaped object (or reuse the model without inserting a review batch if easier — inserting a local `ProductDraft` with `decision=approved` and `shopify_status` after create is **preferred** so `/sync` and local inventory stay consistent).
+4. Call **`create_product(draft)`** — same function as review finish. Set `shopify_status` / `shopify_product_id` on the local row.
+5. After products exist, **try** 3–5 demo orders:
+   - Prefer `draftOrderCreate` + `draftOrderComplete` (or the smallest mutation that produces a visible order in admin).
+   - Line items: 1–2 seeded variant IDs, qty 1.
+   - If GraphQL access denied / userErrors: `orders_skipped` += remaining, append a short error string, **do not** fail product seed.
+6. Also call `ensure_analytics_data` if mock tables empty, so `/dashboard` works immediately after seed.
 
-`create_product(draft) -> {status, product_id, error}`.
+### Bot `/seed-shopify`
 
-If domain or token empty: `skipped`.
-
-Else Admin GraphQL `https://{SHOPIFY_STORE_DOMAIN}/admin/api/{SHOPIFY_API_VERSION}/graphql.json` with `X-Shopify-Access-Token`.
-
-Create product with title, one variant (price, inventory), optional `compareAtPrice`, image from generated file (Shopify staged upload **or** `productCreate` with image url if you host it — for v1, `productCreate` media using `https` is hard locally). Prefer: `productCreate` with title + variant; then `productCreateMedia` with `originalSource` as a data URL **only if API allows**; otherwise skip image upload in v1 and still create the product (document in README). Do not block the whole finish flow on image upload failure.
-
-Scopes expected: `write_products`, `read_products`, `write_inventory`.
-
-## Implementation order (loop each until verify)
-
-1. Scaffold pyproject, config, DB, empty FastAPI, `GET /health` → `uvicorn` serves health.
-2. Models + link helper `create_link(kind, ttl)` / `get_valid_link(token)` → tests in `test_links.py` (valid, expired, wrong kind).
-3. OpenRouter wrappers with httpx; unit tests mock httpx (no live key required in CI).
-4. Batch pipeline: fake vision/image in tests; writes files + ProductDrafts + review link.
-5. Telegram batching debounce: unit-test the buffer (fake clock / short idle), not a live bot.
-6. Review APIs + HTML/JS. `test_swipe.py`: swipe persists, left/right sets decision, finish without Shopify token → `skipped`.
-7. Shopify client: `test_shopify_skip.py` empty token; one mocked GraphQL success test.
-8. Queries + overflow: `test_overflow.py` 9 rows → link; 2 rows → text.
-9. README: `.env`, `python -m venv`, install, `python -m src.main`, ngrok note, Partner store note.
+Allowed users only. Reply with counts (created / skipped / orders / errors). Warn that this writes to the **dev store**. Idempotent: running twice should skip existing `IMS Seed —` titles.
 
 ## Tests
 
-pytest + httpx `AsyncClient` + pytest-asyncio. No live OpenRouter/Telegram/Shopify in tests. Mock those clients.
+**Dashboard** (`tests/test_dashboard.py`) — mock HTTP, no live Shopify/OpenRouter:
 
-## Done when
+1. `ensure_analytics_data` twice → same product count
+2. No drafts → ≥8 mock products and ≥1 sale
+3. Fake LLM gets prompt `"low stock"`; payload stores that prompt
+4. Fallback spec has kpis + chart or table
+5. Expired `/api/data/{token}` → 404
 
-- `pytest` passes.
-- `python -m src.main` starts FastAPI + bot polling (bot no-ops if token empty, log a warning, **app still serves** `/r/` for local UI testing).
-- Sending N photos (with token) yields one `/r/{token}` after idle.
-- Opening that URL shows carousel, chips, swipe events in DB.
-- Finish without Shopify token saves locally.
-- “List all products” with many rows yields `/d/{token}` with a table.
+**Shopify seed** (`tests/test_shopify_seed.py`):
+
+1. Not configured → no GraphQL, error message in result
+2. Mock `create_product` + mock “already exists” query → second run `products_created==0` and `products_skipped>=1`
+3. Order mutation raises → `products_created>=1` (with mocked create) still ok, `orders_created==0`
+
+## Implementation order
+
+1. Mock models + analytics seed + snapshot + dashboard tests 1–2
+2. Fallback spec + `create_dashboard` + dashboard tests 3–5
+3. data.html/js/css
+4. `/dashboard` command
+5. `shopify_seed` + tests
+6. `/seed-shopify` + README
+7. Full `pytest`
 
 ## Do not
 
-- Rewrite this plan mid-flight unless a locked decision is impossible.
-- Add auth, multi-tenant, webhooks, Celery, Docker, Next.js, pi-agent, Shopify embedded app.
-- Commit `.env` or `data/`.
-- Invent extra product fields (SKU, tags, collections) unless required by the Shopify mutation you use.
+- Rebuild v1; commit `.env`, `data/`, `temp/`
+- Push local `MockSale` rows to Shopify as products
+- Make `/dashboard` write to Shopify
+- Require order scopes for `/dashboard` or product seed success
+- Add dashboard login beyond the unguessable token
+
+## After implementation — what exists and how to test
+
+Tell the operator (and put a short version in README):
+
+**Built**
+
+1. `/dashboard [prompt]` — Telegram → local mock inventory/sales → generated read-only page `/d/{token}`
+2. `/seed-shopify` — real products on Shopify titled `IMS Seed — …` via the same create/image path as review; optional demo orders
+3. Local `MockProduct`/`MockSale` — dashboard only
+
+**Test matrix**
+
+| What | How | Success |
+|---|---|---|
+| Local analytics | `/dashboard` then `/dashboard low stock` | Two links; pages differ; KPIs + chart/table; subtitle mentions demo analytics |
+| Link expiry | Wait TTL or expire in DB | `/d/{token}` 404 |
+| Shopify products | `/seed-shopify` then [admin Products](https://admin.shopify.com/store/ims-dev-store-s8ak7vex/products) | New `IMS Seed —` rows; second `/seed-shopify` skips them |
+| Same product pipeline | Telegram photo → approve → Finish | Product **without** `IMS Seed —` prefix appears in admin (real flow) |
+| Demo orders | After seed, admin **Orders** | 3–5 orders **or** Telegram says orders skipped (scopes) |
+| Isolation | `/dashboard` after seed | Charts still from **local** mock sales, not Shopify order totals (unless you later add Shopify reads — **do not** in this increment) |
+
+**Not in this increment:** live Shopify order totals on the dashboard; storefront password is still a Shopify admin setting.
